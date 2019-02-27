@@ -1,11 +1,18 @@
 import numpy as np
 import tensorflow as tf
 import pandas as pd
-import os
+import os, sys
 from tensorflow.python.ops import rnn, rnn_cell
 
 from defaults import Defaults
 import evaluation
+import gflags
+
+gflags.DEFINE_boolean('is_training',True,'set up mode')
+gflags.DEFINE_integer('batch_size',128,'batch size')
+gflags.DEFINE_string('loss','bpr','train loss')
+FLAGS = gflags.FLAGS
+FLAGS(sys.argv)
 
 PATH_TO_TRAIN = './data/rsc15_train_full.txt'
 PATH_TO_TEST = './data/rsc15_test.txt'
@@ -174,7 +181,7 @@ class Session4RecPredictor:
         self.train_op = optimizer.apply_gradients(capped_gvs, global_step = self.global_step)
 
     def init(self, data):
-        data.sort([self.session_key, self.time_key], inplace = True)
+        data.sort_values([self.session_key, self.time_key], inplace = True)
         offset_sessions = np.zeros(data[self.session_key].nunique() + 1, dtype = np.int32)
         offset_sessions[1:] = data.groupby(self.session_key).size().cumsum()
         return offset_sessions
@@ -295,8 +302,19 @@ class Session4RecPredictor:
 if __name__ == '__main__':
     defaults = Defaults()
 
-    data = pd.read_csv(PATH_TO_TRAIN, sep='\t', dtype={'ItemId': np.int64})
-    valid = pd.read_csv(PATH_TO_TEST, sep='\t', dtype={'ItemId': np.int64})
+    defaults.is_training = FLAGS.is_training
+    defaults.batch_size = FLAGS.batch_size
+    defaults.loss = FLAGS.loss
+
+    PATH_TO_TRAIN = 'data/yoochoose-clicks.dat'
+    PATH_TO_TEST = 'data/yoochoose-buys.dat'
+    traindata_header = ['SessionId', 'Time', 'ItemId', 'Category']
+    validdata_header = ['SessionId', 'Time', 'ItemId', 'Price', 'Quantity']
+    train_dtype={'SessionID': object, 'Timestamp': object, 'Itemid': object, 'Category': object}
+    valid_dtype={'SessionID': object, 'Timestamp': object, 'Itemid': object, 'Price': object, 'Quantity':object}
+   
+    data = pd.read_csv(PATH_TO_TRAIN, sep=',', dtype=train_dtype, names=traindata_header)
+    valid = pd.read_csv(PATH_TO_TEST, sep=',', dtype=valid_dtype, names=validdata_header)
 
     defaults.n_items = len(data['ItemId'].unique())
     defaults.dropout_p_hidden = 1.0 if defaults.is_training == 0 else 0.5
@@ -314,5 +332,5 @@ if __name__ == '__main__':
             print('Start session4rec training...')
             predictor.train(data)
         else:
-            res = evaluation.evaluate_sessions_batch(predictor, data, valid)
+            res = evaluation.evaluate_sessions_batch(predictor, data, valid, batch_size=defaults.batch_size)
             print('Recall@20: {}\tMRR@20: {}'.format(res[0], res[1]))
